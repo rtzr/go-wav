@@ -199,6 +199,41 @@ func (e *Encoder) Write(buf *audio.IntBuffer) error {
 	return e.addBuffer(buf)
 }
 
+// CopyFrom copy binary data to the underlying writer.
+func (e *Encoder) CopyFrom(data io.Reader, frameCount int) error {
+	if !e.wroteHeader {
+		if err := e.writeHeader(); err != nil {
+			return err
+		}
+	}
+
+	if !e.pcmChunkStarted {
+		// sound header
+		if err := e.AddLE(riff.DataFormatID); err != nil {
+			return fmt.Errorf("error encoding sound header %v", err)
+		}
+		e.pcmChunkStarted = true
+
+		// write a temporary chunksize
+		e.pcmChunkSizePos = e.WrittenBytes
+		if err := e.AddLE(uint32(42)); err != nil {
+			return fmt.Errorf("%v when writing wav data chunk size header", err)
+		}
+	}
+
+	dataLength := frameCount * (e.BitDepth / 8) * e.NumChans
+	source := io.LimitReader(data, int64(dataLength))
+	if n, err := io.Copy(e.w, source); err != nil {
+		e.WrittenBytes += int(n)
+		e.frames += int(n) / ((e.BitDepth / 8) * e.NumChans)
+		return err
+	}
+
+	e.WrittenBytes += dataLength
+	e.frames += frameCount
+	return nil
+}
+
 // WriteFrame writes a single frame of data to the underlying writer.
 func (e *Encoder) WriteFrame(value interface{}) error {
 	if !e.wroteHeader {
